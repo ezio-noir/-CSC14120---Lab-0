@@ -47,10 +47,7 @@ bool parseArguments(int argc, char **argv, int *ptr_n, int *ptr_v, char **ptr_fi
  */
 void loadVectorsFromFile(float *vec1, float *vec2, int n, char *filePath) {
     FILE *f = fopen(filePath, "r");
-    if (!f) {
-        printf("Cannot read from file %s !\n", filePath);
-        exit(EXIT_FAILURE);
-    }
+    if (!f) PANIC("Cannot read from file %s !\n", filePath)
 
     for (int i = 0; i < n; ++i) fscanf(f, "%f", vec1 + i);
     for (int i = 0; i < n; ++i) fscanf(f, "%f", vec2 + i);
@@ -69,12 +66,18 @@ void initVectorsRandomly(float *vec1, float *vec2, int n) {
     }
 }
 
+/**
+ * @brief Performs vector addition on CPU
+ */
 void addVectorsHost(float *h_in1, float *h_in2, float *h_out, int n) {
     for (int i = 0; i < n; ++i) {
         h_out[i] = h_in1[i] + h_in2[i];
     }
 }
 
+/**
+ * @brief Performs vector addition on device (version 1)
+ */
 __global__ void addVectorsDevV1(float *d_in1, float *d_in2, float *d_out, int n) {
     int idx1 = blockIdx.x * blockDim.x * 2 + threadIdx.x;
     if (idx1 < n) d_out[idx1] = d_in1[idx1] + d_in2[idx1];
@@ -83,6 +86,9 @@ __global__ void addVectorsDevV1(float *d_in1, float *d_in2, float *d_out, int n)
     if (idx2 < n) d_out[idx2] = d_in1[idx2] + d_in2[idx2];
 }
 
+/**
+ * @brief Performs vector addition on device (version 2)
+ */
 __global__ void addVectorsDevV2(float *d_in1, float *d_in2, float *d_out, int n) {
     int idx1 = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
     if (idx1 < n) d_out[idx1] = d_in1[idx1] + d_in2[idx1];
@@ -92,7 +98,7 @@ __global__ void addVectorsDevV2(float *d_in1, float *d_in2, float *d_out, int n)
 }
 
 /**
- * @briefs Run add vectors on host and measure execution time
+ * @briefs Runs add vectors on host and measure execution time
  * @return execution time in ms
  */
 float h_performAddVectorsAndMeasureTime(float *h_in1, float *h_in2, float *h_out, int n, int version) {
@@ -111,6 +117,10 @@ float h_performAddVectorsAndMeasureTime(float *h_in1, float *h_in2, float *h_out
     return (float)(end - start) / CLOCKS_PER_SEC * 1000;
 }
 
+/**
+ * @briefs Runs add vectors on device and measure execution time
+ * @return execution time in ms
+ */
 float d_performAddVectorsAndMeasureTime(float *d_in1, float *d_in2, float *d_out, int n, int version, cudaEvent_t start, cudaEvent_t end) {
     dim3 blockSize(256);
     dim3 gridSize((n - 1) / blockSize.x + 1);
@@ -137,6 +147,10 @@ float d_performAddVectorsAndMeasureTime(float *d_in1, float *d_in2, float *d_out
 
 }
 
+/**
+ * @brief Main function
+ * All non-stack (heap and device memory) objects are only allocated here.
+ */
 int main(int argc, char **argv) {
     if (!(argc == 3 || argc == 5 || argc == 7)) {
         printf("Expect 2 or 3 arguments.\n");
@@ -146,18 +160,16 @@ int main(int argc, char **argv) {
     int n, v;
     char *filePath = NULL;
 
-    if (!parseArguments(argc, argv, &n, &v, &filePath)) {
-        printf("Invalid arguments!\n");
-        exit(EXIT_FAILURE);
-    }
+    if (!parseArguments(argc, argv, &n, &v, &filePath))
+        PANIC("Invalid argument: n: %d, v: %d, f: %s\n", n, v, filePath)
 
     float *h_in1, *h_in2, *h_out;
+    h_in1 = h_in2 = h_out = NULL;
     size_t vectorSizeInBytes = n * sizeof(float);
 
     // Allocate host memory
     MALLOC_CHECK(h_in1, float, vectorSizeInBytes);
     MALLOC_CHECK(h_in2, float, vectorSizeInBytes);
-    MALLOC_CHECK(h_out, float, vectorSizeInBytes);
 
     // Initialize input vectors
     if (filePath) {
@@ -170,6 +182,7 @@ int main(int argc, char **argv) {
 
     float elapsedTimeMs = 0;
     if (v == HOST) {
+        MALLOC_CHECK(h_out, float, vectorSizeInBytes);
         elapsedTimeMs = h_performAddVectorsAndMeasureTime(h_in1, h_in2, h_out, n, v);
     } else if (v == DEV_V1 || v == DEV_V2) {
         float *d_in1, *d_in2, *d_out;
@@ -197,9 +210,9 @@ int main(int argc, char **argv) {
     printf("elapsed time: %f ms.\n", elapsedTimeMs);
 
     // Free host memory
-    free(h_in1);
-    free(h_in2);
-    free(h_out);
+    if (h_in1) free(h_in1);
+    if (h_in2) free(h_in2);
+    if (h_out) free(h_out);
 
     return 0;
 }
